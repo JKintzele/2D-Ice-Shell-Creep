@@ -1,5 +1,5 @@
 %% Viscous Flow in Europa's Ice Shell
-%clear variables
+clear variables
 rhow=1050;
 rhoi=920;
 drho=rhow-rhoi;
@@ -9,8 +9,8 @@ Ts=100;
 r=1535*10^3;
 tconv=86400*365.25;
 %% mesh:
-Nz=301;
-Ntheta=301;
+Nz=101;
+Ntheta=101;
 Nt=50000;
 
 H=zeros(1,Ntheta);Hd=zeros(Nt,Ntheta);dHdtheta=zeros(1,Ntheta); dHdt=zeros(1,Ntheta);
@@ -23,7 +23,7 @@ zdim=linspace(-rhoi/rhow,ztdim,Nz);%dimensionless vertical coordinate (z/H)
 dzdim=abs(zdim(2)-zdim(1)); %zt is transitional depth
 theta=linspace(0,pi,Ntheta); %co-latitude
 ds=theta(2)-theta(1);
-dt=tconv*5;
+dt=tconv;
 %% initial perturbation:
 Hmin=2*10^3;
 Havg=25*10^3;
@@ -39,9 +39,9 @@ H(i)=Hmin+dH/dtheta*abs(theta(i)-pi/2); %initial shell thickness
 H(i)=Hmin+dH;
     end
 end
- dHdtheta(2:(Ntheta-1)/2)=-dH/dtheta; %basal slope
- dHdtheta((Ntheta-1)/2+2:Ntheta-1)=dH/dtheta;
- %dHdtheta(:)=dH/dtheta;
+ dHdtheta(1:(Ntheta-1)/2)=-dH/dtheta; %basal slope
+ dHdtheta((Ntheta-1)/2+2:Ntheta)=dH/dtheta;
+%  dHdtheta(:)=dH/dtheta;
  
 Hd(1,:)=H; %prescribe initial thickness
 dz(:)=dzdim*Hd(1,:);
@@ -80,12 +80,11 @@ for k=2:Nt
         
 u(j-1,i)=u(j+1,i)-2*dz(i)*...%meridional ice velocity
     (2*A(j,creep)*...
-    abs(rhoi*g*(zdim(j)-zdim(1))*Hd(k-1,i)*drho/rhow*(dHdtheta(i))/r)^n(creep))...
+    (rhoi*g*(zdim(j)-zdim(1))*Hd(k-1,i)*drho/rhow*abs(dHdtheta(i))/r)^n(creep))...
     *sign(dHdtheta(i));
-u(j,2)=u(j,3); u(j,end-1)=u(j,end-2);
 
 q(i)=Hd(k-1,i)*u(1,i)/2; %ice flux
-q(2)=q(3); q(end-1)=q(end-2);
+
 % eta(j,i)=1/(2*A(j,creep))*... %effective viscosity
 %    (rhoi*g*(zdim(j)-zdim(1))*Hd(k-1,i)*abs(dHdtheta(i))/r*drho/rhow)^(1-n(creep));
         end
@@ -96,19 +95,19 @@ for i=2:Ntheta-1 %thinning rate
 end
 dHdt(1)=dHdt(2); dHdt(end)=dHdt(end-1);
 
-for i=1:Ntheta % thickness for next timestep
+for i=2:Ntheta-1 % thickness for next timestep
 Hd(k,i)=Hd(k-1,i)+dt*dHdt(i);
 end
-%Hd(k,1)=Hd(k,2); Hd(k,end)=Hd(k,end-1);
+Hd(k,1)=Hd(k,2); Hd(k,end)=Hd(k,end-1);
 
 for i=1:Ntheta
-dz(i)=dzdim*abs(Hd(k,i)); %grid spacing for next timestep
+dz(i)=dzdim*Hd(k,i); %grid spacing for next timestep
 if i>1 && i<Ntheta
         %thickness gradient for next timestep:
     dHdtheta(i)=(Hd(k,i+1)-Hd(k,i-1))/(2*ds); 
 end  
 end
-dHdtheta(1)=0; dHdtheta(end)=0; 
+dHdtheta(1)=dHdtheta(2); dHdtheta(end)=dHdtheta(end-1);
 
 end
 
@@ -132,7 +131,7 @@ end
 % ylabel('dHdt [km/yr]')
 % set(gca, 'YDir', 'Reverse')
 %%
-% 
+
 % figure(2)
 % 
 % subplot(1,2,1)
@@ -141,7 +140,7 @@ end
 % p1=plot(log10(A(:,1)/A0(1)),zdim-zdim(1),'b-','LineWidth',2);
 % p2=plot(log10(A(:,2)/A0(2)),zdim-zdim(1),'r-','LineWidth',2);
 % %p3=plot(log10(A(:,3)/A0(3)),zdim,'g-');
-% legend([p1 p2], {'Diffusion Creep','Dislocation, GBS'},'Location','SW')
+% legend([p1 p2], {'Diffusion','Dislocation, GBS'},'Location','SW')
 % xlabel('log_{10}(A/A0)')
 % ylabel('dimensionless shell height')
 % ylim([0 zdim(end)-zdim(1)])
@@ -167,29 +166,27 @@ end
 %%
 % figure(4)
 % hold on
-% imagesc(theta./pi,zdim-zdim(1),u.*tconv)
+% imagesc(theta./pi,zdim-zdim(1),-u.*tconv)
 % set(gca,'YDir','normal')
 % ylim([0, ztdim-zdim(1)])
 % xlim([theta(2) theta(Ntheta-1)]./pi)
 % xlabel('\theta [pi]');
 % ylabel('height in shell');
-% title('Meridional Ice Velocity')
+% title('Equatorial Ice Velocity')
 % clrbrv=colorbar;
 % clrbrv.Label.String = 'u_{\theta} [m/yr]';
 %%
 % figure(5)
-% % imagesc(theta./pi,zdim-zdim(1),log10(eta/eta0))%,[log10(eta0) log10(1000*eta0)])
-% % set(gca,'YDir','normal') 
-% %xlim([theta(1) theta(Ntheta)]./pi) %xlabel('\theta [pi]')
-% 
-% plot(log10(eta/eta0),zdim-zdim(1))
+% imagesc(theta./pi,zdim-zdim(1),log10(eta))%,[log10(eta0) log10(1000*eta0)])
+% set(gca,'YDir','normal')
 % ylim([0, ztdim-zdim(1)])
-% 
-% xlabel('log_{10}(\eta/\eta_0)')
+% xlim([theta(1) theta(Ntheta)]./pi)
+% xlabel('effective viscosity [Pa s]')
+% xlabel('\theta [pi]');
 % ylabel('height in shell');
 % title('Effective Ice Viscosity')
-% %clrbr=colorbar;
-% %clrbr.Label.String = 'log_{10}(\eta/\eta_0)';
+% clrbr=colorbar;
+% clrbr.Label.String = 'log_{10}(\eta)';
 %%
 num=10;
 figure(7)
@@ -203,5 +200,6 @@ xlim([theta(1) theta(Ntheta)]./pi)
 xlabel('\theta [pi]')
 ylabel('Shell Thickness [km]')
 set(gca, 'YDir','Reverse')
+
 %%
-H12b=Hd(1:100:end,:);
+%H12full=Hd(1:100:50000,:);
