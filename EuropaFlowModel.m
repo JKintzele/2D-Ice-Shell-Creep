@@ -1,8 +1,9 @@
-%% Viscous Creep in a Spherical Shell
+% Viscous Creep in a Spherical Shell
 % Jakob Kintzele, Princeton University Geosciences 
 % Last Update: May 5, 2022
 
 clear variables
+clear figures
 %% =========== Constants =========== 
 rhoi=920; %shell density
 rhow=1050; %ocean density [if relevant]
@@ -19,39 +20,40 @@ Nt=100000;%50000; %timesteps
 
 Nz=101; %z-elements
 Ntheta=51; %theta-elements
-H=zeros(1,Ntheta);Hd=zeros(2,Ntheta);dHdtheta=zeros(1,Ntheta); dHdt=zeros(1,Ntheta);
+H=zeros(2,Ntheta);dHdtheta=zeros(1,Ntheta); dHdt=zeros(1,Ntheta);
 u=zeros(Nz,Ntheta);q=zeros(1,Ntheta);
 A=zeros(Nz,3);T=zeros(Nz,1);eta=zeros(Nz,Ntheta);
 dz=zeros(1,Ntheta); 
 
-trans_rel=0.25; % relative percentage of shell which deforms viscously
+trans_rel=0.3; % relative percentage of shell which deforms viscously
 ztdim=(rhow-2*rhoi)/(rhow)*trans_rel; %z=0 is neutral buoyancy, zt is visc-elastic transition depth
 zdim=linspace(-rhoi/rhow,ztdim,Nz);%dimensionless vertical coordinate (z/H)
 dzdim=abs(zdim(2)-zdim(1)); %dimensionless z-spacing
 theta=linspace(0,pi,Ntheta); %co-latitude
 ds=theta(2)-theta(1); %theta spacing
-dt=tconv/100; %timestep [tconv/100 (n=4,Ntheta=51)-tconv*5 (n=1-1.8,Ntheta=51)]
+dt=tconv/100; %timestep
 %% =========== initial thickness perturbation =========== 
 Hmin=2*10^3; % minimum thickness
-Havg=25*10^3; % initial polar/maximum thickness
-Heq=0.5*(Hmin+Havg); % estimated equilibrium thickness
+Hpole=25*10^3; % initial polar/maximum thickness
+Heq=10^4; % predicted equilibrium thickness
+Htol=10^3; % equilibrium thickness tolerance range
 
-dH=Havg-Hmin; % max-min thickness 
+dH=Hpole-Hmin; % max-min thickness 
 dtheta=pi/2; % half the range of thinned region
 
 for i=1:Ntheta %initial shell thickness
     if theta(i)<=pi/2+dtheta && theta(i)>=pi/2-dtheta %thinned region
-Hd(1,i)=dH*cos(theta(i)*2)./2+Hmin+dH/2;
+H(1,i)=dH*cos(theta(i)*2)./2+Hmin+dH/2;
     else
-Hd(1,i)=Hmin+dH;
+H(1,i)=Hmin+dH;
     end
     dHdtheta(i)=-dH/2*sin(2*theta(i)); %thickness gradient
 end
 
-dz(:)=dzdim.*Hd(1,:); %initial grid spacing
+dz(:)=dzdim.*H(1,:); %initial grid spacing
 %% =========== Rheology =========== 
 
-% creep=[1 2 3];
+% creep= [1], [2], or [3]
 % [1]= newtonian diffusion creep
 % [2]= grain boundary sliding
 % [3]= dislocation creep
@@ -65,7 +67,7 @@ Q=[60, 49, 60].*10^3;%activation energy [J/mol]
 
 for i=1:3
     A0(i)=1/(2*eta0)*... %effective viscosity
-    (rhoi*g*dzdim*mean(H)*dH/dtheta/r*drho/rhow)^(1-n(i));
+    (rhoi*g*dzdim*mean(H(1,:))*dH/dtheta/r*drho/rhow)^(1-n(i));
 for j=1:Nz
    T(j)=Tm+(Ts-Tm)*(zdim(j)-zdim(1)); %temperature
    A(j,i)=A0(i)*exp(-Q(i)/R*(1/T(j)-1/Tm)); %creep parameter   
@@ -78,18 +80,19 @@ eta(1,:)=eta0;
 figure
 set(gca,'YDir','Reverse')
 pic=Nt/10; % Nt/ # of snapshots 
-
+hold on
+plot(theta./pi,H(1,:)./10^3,'k-')
 for k=1:Nt % time loop
     for j=Nz-1:-1:2 % z-loop
 %------meridional velocity-------------------------------------------------       
 u(j-1,:)=u(j+1,:)-2*dz.*...%
     (2*A(j,creep)*...
-    (rhoi*g*(zdim(j)-zdim(1)).*Hd(1,:).*drho/rhow.*abs(dHdtheta)/r).^n(creep))...
+    (rhoi*g*(zdim(j)-zdim(1)).*H(1,:).*drho/rhow.*abs(dHdtheta)/r).^n(creep))...
     .*sign(dHdtheta);
 %boundary conditions [if necessary]:
 u(:,1)=0; u(:,end)=0; u(:,(Nz-1)/2+1)=0; 
 %areal flux: 
-q=Hd(1,:).*trans_rel.*u(1,:);   
+q=H(1,:).*trans_rel.*u(1,:);   
 %------effective viscosity------------------------------------------------- 
 % eta(j,i)=1/(2*A(j,creep))*... 
 %    (rhoi*g*(zdim(j)-zdim(1))*Hd(k-1,i)*abs(dHdtheta(i))/r*drho/rhow)^(1-n(creep));
@@ -99,36 +102,46 @@ q=Hd(1,:).*trans_rel.*u(1,:);
 for i=2:Ntheta-1 
      dHdt(i)= -1/r*((q(i+1)-q(i-1))/(2*ds) + q(i)*cot(theta(i))); 
 end
-dHdt(1)=dHdt(2); dHdt(end)=dHdt(end-1);                                     %Hd(k+1,i)=Hd(k-1,i)+2*dt*dHdt(i); 
-                                                                            %Hd(k,1)=Hd(k,2); Hd(k,end)=Hd(k,end-1);                                                                            %dz(i)=dzdim*Hd(k,i); %grid spacing for next timestep
+dHdt(1)=dHdt(2); dHdt(end)=dHdt(end-1);                                                                                                                 %dz(i)=dzdim*Hd(k,i); %grid spacing for next timestep
 %-----timetepping----------------------------------------------------------
-Hd(2,:)=Hd(1,:)+dt.*dHdt;
-dz=dzdim.*Hd(2,:); 
+H(2,:)=H(1,:)+dt.*dHdt;
+dz=dzdim.*H(2,:); 
 
-%-----break loop for NaN values--------------------------------------------
-    if any(isnan(Hd(2,:)), 'all')
+%-----break loop for NaN values or ~uniform thickness----------------------
+    if any(isnan(H(2,:)), 'all')
     sprintf('NaN H Values')
+    break
+    end
+    if H(2,(Ntheta-1)/2+1)>=Heq-Htol
     break
     end
 
 %-----thickness gradient---------------------------------------------------
 for i=2:Ntheta-1 
-dHdtheta(i)=(Hd(2,i+1)-Hd(2,i-1))/(2*ds);                                    %dHdtheta(i)=(Hd(k,i+1)-Hd(k,i-1))/(2*ds); 
+dHdtheta(i)=(H(2,i+1)-H(2,i-1))/(2*ds);                                   
 end  
 dHdtheta(1)=dHdtheta(2); dHdtheta(end)=dHdtheta(end-1);
 
 %-----plot snapshots-------------------------------------------------------
     if mod(k,pic)==0
-hold on
-plot(theta./pi,Hd(2,:)./10^3)
+plot(theta./pi,H(2,:)./10^3)
 drawnow
     end
 %-----reset thickness vector-----------------------------------------------
-Hd(1,:)=Hd(2,:); 
+H(1,:)=H(2,:); 
 end
-
+%%
+simulation_time=sprintf('%0.3g yr',k*dt./tconv)
 %% =========== figures ============
 
+%% ===Thickness===
+xlabel('\theta [\pi]')
+ylabel('Shell Thickness [km]')
+Title=sprintf('$\\eta_0$=10$^{%d}$ Pa$\\cdot$s, n=%g',[log10(eta0),n(creep)]);
+title(Title,'Interpreter','Latex')
+text(0.5,(Hmin)/10^3-1,'initial state','HorizontalAlignment', 'center')
+text(0.5,(Heq)/10^3+1,'final state','HorizontalAlignment', 'center')
+text(0.5,(Hpole)/10^3-1,simulation_time,'HorizontalAlignment', 'center')
 %% ===Rheology===
 % figure(2)
 % 
@@ -176,16 +189,4 @@ end
 % clrbrv=colorbar;
 % clrbrv.Label.String = 'u_{\theta} [m/yr]';
 
-%% ===Thickness===
-% num=10;
-% figure(1)
-% hold on
-% grid on
-% plot(theta./pi,H./10^3,'b-','LineWidth',2)
-% %for k=1:num
-%     plot(theta./pi,Hd(3,:)./10^3)
-% %end
-% xlim([theta(1) theta(Ntheta)]./pi)
-% xlabel('\theta [pi]')
-% ylabel('Shell Thickness [km]')
-% set(gca, 'YDir','Reverse')
+
