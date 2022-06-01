@@ -1,9 +1,8 @@
 % Viscous Creep in a Spherical Shell
 % Jakob Kintzele, Princeton University Geosciences 
-% Last Update: May 5, 2022
+% Last Update: June 1, 2022
 
 clear variables
-clear figures
 %% =========== Constants =========== 
 rhoi=920; %shell density
 rhow=1050; %ocean density [if relevant]
@@ -16,12 +15,12 @@ tconv=86400*365.25; %s->yr
 %% =========== Mesh =========== 
 
 %forward-difference time scheme:
-Nt=100000;%50000; %timesteps
+Nt=100000; %timesteps
 
 Nz=101; %z-elements
 Ntheta=51; %theta-elements
 H=zeros(2,Ntheta);dHdtheta=zeros(1,Ntheta); dHdt=zeros(1,Ntheta);
-u=zeros(Nz,Ntheta);q=zeros(1,Ntheta);
+u=zeros(Nz,Ntheta);q=zeros(1,Ntheta);e_t=zeros(Nz,Ntheta);
 A=zeros(Nz,3);T=zeros(Nz,1);eta=zeros(Nz,Ntheta);
 dz=zeros(1,Ntheta); 
 
@@ -31,7 +30,8 @@ zdim=linspace(-rhoi/rhow,ztdim,Nz);%dimensionless vertical coordinate (z/H)
 dzdim=abs(zdim(2)-zdim(1)); %dimensionless z-spacing
 theta=linspace(0,pi,Ntheta); %co-latitude
 ds=theta(2)-theta(1); %theta spacing
-dt=tconv/100; %timestep
+dt=tconv*5; %timestep (overwritten in rheology section)
+
 %% =========== initial thickness perturbation =========== 
 Hmin=2*10^3; % minimum thickness
 Hpole=25*10^3; % initial polar/maximum thickness
@@ -51,14 +51,24 @@ H(1,i)=Hmin+dH;
 end
 
 dz(:)=dzdim.*H(1,:); %initial grid spacing
+
 %% =========== Rheology =========== 
 
 % creep= [1], [2], or [3]
 % [1]= newtonian diffusion creep
 % [2]= grain boundary sliding
 % [3]= dislocation creep
-creep=3
-
+creep=1;
+if creep==1
+    rheology=sprintf('newtonian diffusion creep')
+    dt=tconv*5;
+elseif creep==2
+    rheology=sprintf('grain boundary sliding')
+    dt=tconv*2;
+elseif creep==3
+    rheology=sprintf('dislocation creep')
+    dt=tconv/150;
+end
 eta0=10^12; %basal viscosity [diffusion creep]
 R=8.31; %Gas constant [J/mol/K]
 A0=zeros(1,3);
@@ -74,35 +84,52 @@ for j=1:Nz
 end
 end
 eta(1,:)=eta0;
-
 %% =========== Simulation ===========     
 
 figure
 set(gca,'YDir','Reverse')
 pic=Nt/10; % Nt/ # of snapshots 
 hold on
-plot(theta./pi,H(1,:)./10^3,'k-')
+
+%plot thickness:
+%plot(theta./pi,H(1,:)./10^3,'k-')
+
 for k=1:Nt % time loop
     for j=Nz-1:-1:2 % z-loop
 %------meridional velocity-------------------------------------------------       
-u(j-1,:)=u(j+1,:)-2*dz.*...%
+u(j-1,:)=u(j+1,:)-2*dz.*...
     (2*A(j,creep)*...
     (rhoi*g*(zdim(j)-zdim(1)).*H(1,:).*drho/rhow.*abs(dHdtheta)/r).^n(creep))...
     .*sign(dHdtheta);
 %boundary conditions [if necessary]:
 u(:,1)=0; u(:,end)=0; u(:,(Nz-1)/2+1)=0; 
+
 %areal flux: 
 q=H(1,:).*trans_rel.*u(1,:);   
+
 %------effective viscosity------------------------------------------------- 
 % eta(j,i)=1/(2*A(j,creep))*... 
 %    (rhoi*g*(zdim(j)-zdim(1))*Hd(k-1,i)*abs(dHdtheta(i))/r*drho/rhow)^(1-n(creep));
-
     end
 %-----thinning rate--------------------------------------------------------
 for i=2:Ntheta-1 
      dHdt(i)= -1/r*((q(i+1)-q(i-1))/(2*ds) + q(i)*cot(theta(i))); 
 end
 dHdt(1)=dHdt(2); dHdt(end)=dHdt(end-1);                                                                                                                 %dz(i)=dzdim*Hd(k,i); %grid spacing for next timestep
+
+%-----resistive stress-----------------------------------------------------
+%tangential strain rate:
+for i=2:Ntheta-1 
+e_t(:,i)=((u(:,i+1)-u(:,i-1))/(2*ds)-dHdt(i))./r;
+end
+e_t(:,(Ntheta-1)/2+1)=-dHdt((Ntheta-1)/2+1)/r;
+e_t(:,1)=-dHdt(1)/r; e_t(:,Ntheta)=-dHdt(Ntheta)/r;
+%shear strain rate:
+e_zt=A(:,creep).*(rhoi*g*(zdim(:)-zdim(1)).*H(1,:).*drho/rhow.*abs(dHdtheta ...
+     )/r).^n(creep).*sign(dHdtheta);
+%tangential stress:
+tau_t=A(:,creep).^(-1/n(creep)).*abs(e_zt).^(1/n(creep)-1).*e_t;
+tau_t(:,(Ntheta-1)/2+1)=0;
 %-----timetepping----------------------------------------------------------
 H(2,:)=H(1,:)+dt.*dHdt;
 dz=dzdim.*H(2,:); 
@@ -121,12 +148,21 @@ for i=2:Ntheta-1
 dHdtheta(i)=(H(2,i+1)-H(2,i-1))/(2*ds);                                   
 end  
 dHdtheta(1)=dHdtheta(2); dHdtheta(end)=dHdtheta(end-1);
+dHdtheta((Ntheta-1)/2+1)=0;
 
 %-----plot snapshots-------------------------------------------------------
     if mod(k,pic)==0
-plot(theta./pi,H(2,:)./10^3)
+% plot thickness: 
+%plot(theta./pi,H(2,:)./10^3)
+% plot tensile stress: 
+plot(theta./pi,tau_t(2,:))
+% plot velocity: 
+%plot(theta./pi,u(1,:))
+% plot tangential strain: 
+%plot(theta./pi,e_t(1,:))
 drawnow
     end
+
 %-----reset thickness vector-----------------------------------------------
 H(1,:)=H(2,:); 
 end
@@ -135,13 +171,21 @@ simulation_time=sprintf('%0.3g yr',k*dt./tconv)
 %% =========== figures ============
 
 %% ===Thickness===
+%xlabel('\theta [\pi]')
+%ylabel('Shell Thickness [km]')
+%Title=sprintf('$\\eta_0$=10$^{%d}$ Pa$\\cdot$s, n=%g',[log10(eta0),n(creep)]);
+%title(Title,'Interpreter','Latex')
+%text(0.5,(Hmin)/10^3-1,'initial state','HorizontalAlignment', 'center')
+%text(0.5,(Heq)/10^3+1,'final state','HorizontalAlignment', 'center')
+%text(0.5,(Hpole)/10^3-1,simulation_time,'HorizontalAlignment', 'center')
+
+%% ===Stress===
 xlabel('\theta [\pi]')
-ylabel('Shell Thickness [km]')
+ylabel('Basal Tension [Pa]')
 Title=sprintf('$\\eta_0$=10$^{%d}$ Pa$\\cdot$s, n=%g',[log10(eta0),n(creep)]);
 title(Title,'Interpreter','Latex')
-text(0.5,(Hmin)/10^3-1,'initial state','HorizontalAlignment', 'center')
-text(0.5,(Heq)/10^3+1,'final state','HorizontalAlignment', 'center')
-text(0.5,(Hpole)/10^3-1,simulation_time,'HorizontalAlignment', 'center')
+text(0.5,0,simulation_time,'HorizontalAlignment', 'center')
+
 %% ===Rheology===
 % figure(2)
 % 
@@ -188,5 +232,4 @@ text(0.5,(Hpole)/10^3-1,simulation_time,'HorizontalAlignment', 'center')
 % title('Ice Velocity')
 % clrbrv=colorbar;
 % clrbrv.Label.String = 'u_{\theta} [m/yr]';
-
 
